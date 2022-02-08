@@ -1,11 +1,9 @@
 /*
  *  Author: SpringHack - springhack@live.cn
- *  Last modified: 2022-02-07 23:42:50
+ *  Last modified: 2022-02-08 12:17:31
  *  Filename: hook.cc
  *  Description: Created by SpringHack using vim automatically.
  */
-#define _POSIX_C_SOURCE 200112L
-
 /* C++ standard library  */
 #include <iostream>
 #include <map>
@@ -44,7 +42,6 @@
   } while (0)
 
 /* Registers */
-#if defined(__aarch64__)
 #define GET_REG(child, name, regs) regs.name
 #define SET_REG(child, name, data, regs)                        \
   {                                                             \
@@ -56,19 +53,29 @@
     vec.iov_len = sizeof(user_regs_struct);                     \
     ptrace(PTRACE_SETREGSET, child, NT_PRSTATUS, &vec);         \
   }
-#else
-#define GET_REG(child, name, ...) \
-  real_get_reg(child, offsetof(struct user, regs.name))
-#define SET_REG(child, name, data, ...) \
-  real_set_reg(child, offsetof(struct user, regs.name), data)
-long real_get_reg(pid_t child, int off) {
-  long val = ptrace(PTRACE_PEEKUSER, child, off);
-  return val;
-}
-void real_set_reg(pid_t child, int off, void *data) {
-  ptrace(PTRACE_POKEUSER, child, off, data);
-}
+#if defined(__aarch64__)
+#define ARCH_REG_SP sp
+#define ARCH_REG_SYSCALL_NR regs[8]
+#define ARCH_REG_SYSCALL_RET regs[0]
+#define ARCH_REG_SYSCALL_ARG0 regs[0]
+#define ARCH_REG_SYSCALL_ARG1 regs[1]
+#define ARCH_REG_SYSCALL_ARG2 regs[2]
+#define ARCH_REG_SYSCALL_ARG3 regs[3]
+#define ARCH_REG_SYSCALL_ARG4 regs[4]
+#define ARCH_REG_SYSCALL_ARG5 regs[5]
 #endif  // __aarch64__
+
+#if defined(__x86_64__)
+#define ARCH_REG_SP rsp
+#define ARCH_REG_SYSCALL_NR orig_rax
+#define ARCH_REG_SYSCALL_RET rax
+#define ARCH_REG_SYSCALL_ARG0 rdi
+#define ARCH_REG_SYSCALL_ARG1 rsi
+#define ARCH_REG_SYSCALL_ARG2 rdx
+#define ARCH_REG_SYSCALL_ARG3 r10
+#define ARCH_REG_SYSCALL_ARG4 r8
+#define ARCH_REG_SYSCALL_ARG5 r9
+#endif  // __x86_64__
 
 // Log Util
 struct DoLog {
@@ -122,11 +129,8 @@ std::string read_string(pid_t child, unsigned long addr) {
 
 bool write_string(pid_t child, unsigned long addr, const std::string &str,
                   user_regs_struct regs) {
-#if defined(__aarch64__)
-  char *stack_addr = reinterpret_cast<char *>(GET_REG(child, sp, regs));
-#else
-  char *stack_addr = reinterpret_cast<char *>(GET_REG(child, rsp, regs));
-#endif  // __aarch64__
+  char *stack_addr =
+      reinterpret_cast<char *>(GET_REG(child, ARCH_REG_SP, regs));
   stack_addr -= 128 + str.length();
   char *str_addr = stack_addr;
 
@@ -144,22 +148,14 @@ bool write_string(pid_t child, unsigned long addr, const std::string &str,
     ptrace(PTRACE_POKETEXT, child, stack_addr, *(long *)val);
     stack_addr += sizeof(long);
   } while (*buf_ptr);
-#if defined(__aarch64__)
-  SET_REG(child, regs[1], str_addr, regs);
-#else
-  SET_REG(child, rsi, str_addr);
-#endif  // __aarch64__
+  SET_REG(child, ARCH_REG_SYSCALL_ARG1, str_addr, regs);
   return true;
 }
 
 // Hooks
 void HOOK_SYS_openat(const std::map<std::string, std::string> &binds, pid_t pid,
                      user_regs_struct regs) {
-#if defined(__aarch64__)
-  long addr = GET_REG(pid, regs[1], regs);
-#else
-  long addr = GET_REG(pid, rsi, regs);
-#endif  // __aarch64__
+  long addr = GET_REG(pid, ARCH_REG_SYSCALL_ARG1, regs);
   std::string file = read_string(pid, addr);
   LOG(INLINE) << "openat=" << file;
   auto it = binds.find(file);
@@ -190,8 +186,12 @@ int main(int argc, char **argv) {
         offset + 1 < argc) {
       char *host = argv[offset + 1];
       char *guest = strchr(host, ':');
-      *guest = '\0';
-      ++guest;
+      if (!guest) {
+        guest = host;
+      } else {
+        *guest = '\0';
+        ++guest;
+      }
       binds.insert({std::string(host), std::string(guest)});
       offset += 2;
     } else {
@@ -236,24 +236,16 @@ int main(int argc, char **argv) {
     if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &vec) == -1) {
       FATAL("%s", strerror(errno));
     }
-#if defined(__aarch64__)
-    long syscall = regs.regs[8];
-#else
-    long syscall = regs.orig_rax;
-#endif  //__aarch64__
+    long syscall = GET_REG(pid, ARCH_REG_SYSCALL_NR, regs);
 
     /* print a representation of the system call */
-#if defined(__aarch64__)
-    LOG(INFO_START) << "syscall=" << syscall << "(" << (long)regs.regs[0]
-                    << ", " << (long)regs.regs[1] << ", " << (long)regs.regs[2]
-                    << ", " << (long)regs.regs[3] << ", " << (long)regs.regs[4]
-                    << ", " << (long)regs.regs[5] << ")";
-#else
-    LOG(INFO_START) << "syscall=" << syscall << "(" << (long)regs.rdi << ", "
-                    << (long)regs.rsi << ", " << (long)regs.rdx << ", "
-                    << (long)regs.r10 << ", " << (long)regs.r8 << ", "
-                    << (long)regs.r9 << ")";
-#endif  // __aarch64__
+    LOG(INFO_START) << "syscall=" << syscall << "("
+                    << GET_REG(pid, ARCH_REG_SYSCALL_ARG0, regs) << ", "
+                    << GET_REG(pid, ARCH_REG_SYSCALL_ARG1, regs) << ", "
+                    << GET_REG(pid, ARCH_REG_SYSCALL_ARG2, regs) << ", "
+                    << GET_REG(pid, ARCH_REG_SYSCALL_ARG3, regs) << ", "
+                    << GET_REG(pid, ARCH_REG_SYSCALL_ARG4, regs) << ", "
+                    << GET_REG(pid, ARCH_REG_SYSCALL_ARG5, regs) << ")";
 
     /* do hook process */
     do_hook_process(binds, syscall, pid, regs);
@@ -266,20 +258,11 @@ int main(int argc, char **argv) {
     if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &vec) == -1) {
       LOG(INFO_END) << " = ?";
       // system call was _exit(2) or similar
-      if (errno == ESRCH)
-#if defined(__aarch64__)
-        exit(regs.regs[0]);
-#else
-        exit(regs.rdi);
-#endif  // __aarch64__
+      if (errno == ESRCH) exit(GET_REG(pid, ARCH_REG_SYSCALL_ARG0, regs));
       FATAL("%s", strerror(errno));
     }
 
     /* print system call result */
-#if defined(__aarch64__)
-    LOG(INFO_END) << " = " << (long)regs.regs[8];
-#else
-    LOG(INFO_END) << " = " << (long)regs.rax;
-#endif  // __aarch64__
+    LOG(INFO_END) << " = " << GET_REG(pid, ARCH_REG_SYSCALL_RET, regs);
   }
 }
