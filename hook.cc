@@ -1,6 +1,6 @@
 /*
  *  Author: SpringHack - springhack@live.cn
- *  Last modified: 2022-02-08 12:17:31
+ *  Last modified: 2022-02-08 13:22:47
  *  Filename: hook.cc
  *  Description: Created by SpringHack using vim automatically.
  */
@@ -203,7 +203,7 @@ int main(int argc, char **argv) {
     LOG(INFO) << "bind=" << it.first << ":" << it.second;
   }
 
-  if (offset + 1 >= argc) {
+  if (offset >= argc) {
     FATAL("Need execvp arguments !");
   }
 
