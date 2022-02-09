@@ -1,6 +1,6 @@
 /*
  *  Author: SpringHack - springhack@live.cn
- *  Last modified: 2022-02-09 16:11:22
+ *  Last modified: 2022-02-09 23:30:36
  *  Filename: syscall_handler.cc
  *  Description: Created by SpringHack using vim automatically.
  */
@@ -74,12 +74,6 @@ bool write_string(pid_t child, unsigned long addr, const std::string &str,
 // Hooks
 void HOOK_SYS_openat(const std::map<std::string, std::string> &binds, pid_t pid,
                      user_regs_struct regs) {
-  struct iovec vec;
-  vec.iov_base = &regs;
-  vec.iov_len = sizeof(user_regs_struct);
-  if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &vec) == -1) {
-    FATAL("%s", strerror(errno));
-  }
   long addr = GET_REG(pid, ARCH_REG_SYSCALL_ARG1, regs);
   std::string file = read_string(pid, addr);
   LOG(INFO) << "target: openat=" << file;

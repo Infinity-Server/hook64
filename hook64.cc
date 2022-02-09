@@ -1,3 +1,9 @@
+/*
+ *  Author: SpringHack - springhack@live.cn
+ *  Last modified: 2022-02-09 23:46:12
+ *  Filename: hook64.cc
+ *  Description: Created by SpringHack using vim automatically.
+ */
 #include "syscall_handler.h"
 
 enum SYSCALL_STATE { SYSCALL_ENTERED, SYSCALL_EXITED };
@@ -58,9 +64,9 @@ int main(int argc, char **argv) {
   LOG(INFO) << "hook: initial stop observed ...";
 
   int ptrace_options = 0;
-  ptrace_options |= PTRACE_O_TRACESYSGOOD;
   ptrace_options |= PTRACE_O_EXITKILL;
   ptrace_options |= PTRACE_O_TRACECLONE;
+  ptrace_options |= PTRACE_O_TRACESYSGOOD;
 
   LOG(INFO) << "hook: setting ptrace options ...";
   ptrace(PTRACE_SETOPTIONS, child, 0, ptrace_options);
@@ -163,7 +169,7 @@ int main(int argc, char **argv) {
         st.no = GET_REG(pid, ARCH_REG_SYSCALL_NR, regs);
 
         if (st.no == SYS_openat) {
-          HOOK_SYS_openat(binds, pid, {});
+          HOOK_SYS_openat(binds, pid, regs);
         }
         break;
       }
